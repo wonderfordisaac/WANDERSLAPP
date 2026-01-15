@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ny">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WanderSlapp - Friends Fix</title>
+    <script src="https://www.gstatic.com/firebasejs/10.5.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.5.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.5.0/firebase-auth-compat.js"></script>
+    <style>
+        body { font-family: sans-serif; background:#f4f7f6; padding:20px; }
+        .user-card { background: white; padding: 15px; margin-bottom: 10px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .debug-box { background: #000; color: #0f0; padding: 10px; font-family: monospace; font-size: 12px; margin-bottom: 20px; border-radius: 5px; }
+        button { background: #0a142b; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+    <div class="debug-box" id="debug">System status: Waiting for Auth...</div>
+
+    <div id="friendsToggleSection">
+        <button onclick="toggleFriends()">Show/Hide My Friends</button>
+        <div id="myFriendsList" class="hidden">
+            <h3>Anzanu (Confirmed)</h3>
+            <div id="confirmedList"></div>
+        </div>
+    </div>
+
+    <h2>People You May Know</h2>
+    <div id="suggestedList">Kufufuza anthu...</div>
+
+<script>
+    // ✅ Firebase Config
+    const firebaseConfig = {
+        apiKey: "AIzaSyBBZxCwywnv_ZVXYezOV8IKG6iKWK5sL10",
+        authDomain: "studio-ywlo1.firebaseapp.com",
+        projectId: "studio-ywlo1",
+        storageBucket: "studio-ywlo1.appspot.com",
+        messagingSenderId: "791958850921",
+        appId: "1:791958850921:web:149be668e7f132e59f41f8"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    const auth = firebase.auth();
+
+    const debug = document.getElementById("debug");
+
+    auth.onAuthStateChanged(user => {
+        if (user) {
+            debug.innerHTML = "Logged in as: " + user.email;
+            loadPeople(user.uid);
+            loadRequests(user.uid);
+        } else {
+            debug.innerHTML = "Error: No user logged in!";
+        }
+    });
+
+    function toggleFriends() {
+        const div = document.getElementById("myFriendsList");
+        div.classList.toggle("hidden");
+    }
+
+    // 1. Load Suggestions (People You May Know)
+    async function loadPeople(currentID) {
+        try {
+            // Choyamba: Pezani anthu onse mu Firestore "users"
+            const userSnap = await db.collection("users").get();
+            debug.innerHTML += "<br>Firestore Users found: " + userSnap.size;
+
+            // Chachiwiri: Pezani ma ID a anthu omwe muli nawo kale mu "friendRequests"
+            const reqSnap = await db.collection("friendRequests").get();
+            let involvedIDs = [currentID];
+            
+            reqSnap.forEach(doc => {
+                const r = doc.data();
+                if (r.from === currentID) involvedIDs.push(r.to);
+                if (r.to === currentID) involvedIDs.push(r.from);
+            });
+
+            const list = document.getElementById("suggestedList");
+            list.innerHTML = "";
+
+            if (userSnap.empty) {
+                list.innerHTML = "Palibe user aliyense mu Database (Check 'users' collection name).";
+                return;
+            }
+
+            userSnap.forEach(doc => {
+                const userData = doc.data();
+                const userID = doc.id; // Iyi ndiyo UID yeniyeni
+
+                // Onetsani anthu onse kupatula Ineyo ndi omwe tili kale nawo mu request
+                if (!involvedIDs.includes(userID)) {
+                    list.innerHTML += `
+                        <div class="user-card">
+                            <span><b>${userData.fullName || "Mtsogoleri"}</b></span>
+                            <button onclick="addFriend('${userID}', '${userData.fullName}')">Add Friend</button>
+                        </div>
+                    `;
+                }
+            });
+
+            if (list.innerHTML === "") {
+                list.innerHTML = "Anthu onse muli nawo kale pa mndandanda kapena ndinu nokha mu system.";
+            }
+
+        } catch (error) {
+            debug.innerHTML += "<br>Error loading people: " + error.message;
+            console.error(error);
+        }
+    }
+
+    // 2. Load Confirmed Friends & Requests
+    function loadRequests(currentID) {
+        db.collection("friendRequests").onSnapshot(snap => {
+            const confirmedDiv = document.getElementById("confirmedList");
+            confirmedDiv.innerHTML = "";
+            
+            snap.forEach(doc => {
+                const r = doc.data();
+                if (r.status === "confirmed") {
+                    let friendID = (r.from === currentID) ? r.to : r.from;
+                    if (r.from === currentID || r.to === currentID) {
+                        db.collection("users").doc(friendID).get().then(uDoc => {
+                            confirmedDiv.innerHTML += `<div class="user-card">${uDoc.data().fullName} <button onclick="unfriend('${doc.id}')">Unfriend</button></div>`;
+                        });
+                    }
+                }
+            });
+        });
+    }
+
+    // 3. Add Friend Action
+    async function addFriend(targetID, targetName) {
+        const me = auth.currentUser;
+        try {
+            await db.collection("friendRequests").add({
+                from: me.uid,
+                to: targetID,
+                status: "pending",
+                timestamp: Date.now()
+            });
+            
+            // Notification
+            await db.collection("notifications").add({
+                to: targetID,
+                message: "Muli ndi friend request yatsopano.",
+                timestamp: Date.now(),
+                read: false
+            });
+
+            alert("Request yatumizidwa kwa " + targetName);
+            location.reload(); // Refresh kuti asoke pa list
+        } catch (e) {
+            alert("Vuto: " + e.message);
+        }
+    }
+
+    function unfriend(docID) {
+        if(confirm("Kuchotsa?")) db.collection("friendRequests").doc(docID).delete().then(() => location.reload());
+    }
+</script>
+</body>
+</html>

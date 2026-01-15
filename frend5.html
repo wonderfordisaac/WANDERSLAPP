@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="ny">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WanderSlapp - Friends</title>
+    <script src="https://www.gstatic.com/firebasejs/10.5.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.5.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.5.0/firebase-auth-compat.js"></script>
+    <style>
+        body { font-family: sans-serif; background: #f0f2f5; margin: 0; padding: 15px; }
+        .auth-status { background: #333; color: #0f0; padding: 8px; font-size: 11px; margin-bottom: 10px; border-radius: 5px; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .user-card { display: flex; align-items: center; background: white; padding: 10px; margin-bottom: 8px; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .user-info { flex-grow: 1; display: flex; align-items: center; }
+        .user-info img { width: 40px; height: 40px; border-radius: 50%; margin-right: 12px; background: #eee; }
+        button { background: #0a2b4f; color: white; border: none; padding: 7px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+        #friendsSection { display: none; background: #fff; padding: 10px; border-radius: 10px; margin-bottom: 20px; border: 1px solid #ddd; }
+    </style>
+</head>
+<body>
+
+    <div id="authStatus" class="auth-status">Checking login...</div>
+
+    <div class="header">
+        <a href="dashboad.html" style="text-decoration:none; color:#0a2b4f; font-weight:bold;">← Dashboard</a>
+        <button onclick="toggleFriends()" style="border-radius:20px;">Anzanu</button>
+    </div>
+
+    <div id="friendsSection">
+        <h3 style="font-size:14px;">Anzanu a pamtima</h3>
+        <div id="friendsList"></div>
+    </div>
+
+    <h3 style="font-size:14px;">Opempha Ubwenzi</h3>
+    <div id="requestsList"></div>
+
+    <h3 style="font-size:14px;">Anthu ena (People You May Know)</h3>
+    <div id="peopleList">Kufufuza anthu...</div>
+
+<script>
+    const firebaseConfig = {
+        apiKey: "AIzaSyBBZxCwywnv_ZVXYezOV8IKG6iKWK5sL10",
+        authDomain: "studio-ywlo1.firebaseapp.com",
+        projectId: "studio-ywlo1",
+        storageBucket: "studio-ywlo1.appspot.com",
+        messagingSenderId: "791958850921",
+        appId: "1:791958850921:web:149be668e7f132e59f41f8"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    const auth = firebase.auth();
+
+    let myID = null;
+
+    // ✅ CHECK AUTHENTICATION FIRST
+    auth.onAuthStateChanged(user => {
+        const statusDiv = document.getElementById("authStatus");
+        if (user) {
+            myID = user.uid;
+            statusDiv.innerHTML = "Logged in as: " + user.email + " (ID: " + myID + ")";
+            statusDiv.style.color = "#0f0";
+            loadMainData();
+        } else {
+            statusDiv.innerHTML = "VUTO: Simunalowe (Not Authenticated). Bwererani ku index.";
+            statusDiv.style.color = "red";
+            // Ngati palibe login, bwererani ku index pambuyo pa masekondi 2
+            setTimeout(() => { window.location.href = "index.html"; }, 3000);
+        }
+    });
+
+    function toggleFriends() {
+        const x = document.getElementById("friendsSection");
+        x.style.display = (x.style.display === "block") ? "none" : "block";
+    }
+
+    function loadMainData() {
+        // 1. Get Requests & My Involved IDs
+        db.collection("friendRequests").onSnapshot(snap => {
+            const reqDiv = document.getElementById("requestsList");
+            const friendDiv = document.getElementById("friendsList");
+            reqDiv.innerHTML = "";
+            friendDiv.innerHTML = "";
+
+            let involved = [myID];
+
+            snap.forEach(doc => {
+                const d = doc.data();
+                const rid = doc.id;
+
+                if (d.from === myID) involved.push(d.to);
+                if (d.to === myID) involved.push(d.from);
+
+                // Check for incoming requests
+                if (d.to === myID && d.status === "pending") {
+                    displayUser(d.from, reqDiv, `<button onclick="acceptReq('${rid}')">Vomera</button>`);
+                }
+
+                // Check for confirmed friends
+                if (d.status === "confirmed") {
+                    let fID = (d.from === myID) ? d.to : d.from;
+                    if (d.from === myID || d.to === myID) {
+                        displayUser(fID, friendDiv, `<button onclick="deleteReq('${rid}')" style="background:red">Chotsa</button>`);
+                    }
+                }
+            });
+
+            // 2. Load People You May Know
+            loadSuggestedUsers(involved);
+        }, err => {
+            console.error("Request list error:", err);
+            document.getElementById("authStatus").innerHTML = "Firestore Error: " + err.message;
+        });
+    }
+
+    function loadSuggestedUsers(involved) {
+        db.collection("users").get().then(snap => {
+            const list = document.getElementById("peopleList");
+            list.innerHTML = "";
+            
+            snap.forEach(doc => {
+                const uID = doc.id;
+                const u = doc.data();
+                
+                if (!involved.includes(uID)) {
+                    list.innerHTML += `
+                        <div class="user-card">
+                            <div class="user-info">
+                                <img src="${u.profilePhoto || 'https://via.placeholder.com/40'}">
+                                <b>${u.fullName || 'User'}</b>
+                            </div>
+                            <button onclick="sendReq('${uID}')">Add Friend</button>
+                        </div>`;
+                }
+            });
+            if(list.innerHTML === "") list.innerHTML = "Palibe anthu ena pano.";
+        }).catch(err => {
+            document.getElementById("peopleList").innerHTML = "Error loading users: " + err.message;
+        });
+    }
+
+    function displayUser(uid, container, btns) {
+        db.collection("users").doc(uid).get().then(doc => {
+            const u = doc.data();
+            if (u) {
+                container.innerHTML += `
+                    <div class="user-card">
+                        <div class="user-info">
+                            <img src="${u.profilePhoto || 'https://via.placeholder.com/40'}">
+                            <b>${u.fullName}</b>
+                        </div>
+                        ${btns}
+                    </div>`;
+            }
+        });
+    }
+
+    function sendReq(toID) {
+        db.collection("friendRequests").add({ from: myID, to: toID, status: "pending", timestamp: Date.now() });
+    }
+    function acceptReq(id) { db.collection("friendRequests").doc(id).update({ status: "confirmed" }); }
+    function deleteReq(id) { if(confirm("Are you sure?")) db.collection("friendRequests").doc(id).delete(); }
+</script>
+</body>
+</html>

@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ny">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WanderSlapp - Friends</title>
+    <script src="https://www.gstatic.com/firebasejs/10.5.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.5.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.5.0/firebase-auth-compat.js"></script>
+    <style>
+        :root { --main: #0a142b; --accent: #254a83; }
+        body { font-family: sans-serif; background:#f0f2f5; margin:0; padding:15px; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .back-btn { text-decoration: none; color: var(--main); font-weight: bold; }
+        .btn-friends { background: var(--main); color: white; border: none; padding: 7px 12px; border-radius: 20px; font-size: 12px; cursor: pointer; }
+        .section { margin-bottom: 25px; }
+        h2 { font-size: 16px; color: var(--main); border-left: 4px solid var(--accent); padding-left: 8px; margin-bottom: 10px; }
+        .user-card { display:flex; align-items:center; background:#fff; padding:10px; margin-bottom:8px; border-radius:10px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .user-info { display:flex; align-items:center; flex-grow: 1; }
+        .user-info img { width:45px; height:45px; border-radius:50%; margin-right:12px; object-fit: cover; background: #ddd; }
+        .user-info span { font-weight: bold; font-size: 14px; }
+        button.action { padding: 6px 12px; border-radius: 6px; border: none; font-size: 12px; font-weight: bold; cursor: pointer; }
+        .btn-add { background: var(--main); color: #fff; }
+        .btn-confirm { background: #28a745; color: #fff; }
+        .btn-unfriend { background: #eee; color: #d93025; }
+        #friendsList { display: none; background: #e2e8f0; padding: 10px; border-radius: 10px; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <a href="dashboad.html" class="back-btn">← Back</a>
+        <button class="btn-friends" onclick="toggleFriends()">Your Friends</button>
+    </div>
+
+    <div id="friendsList" class="section">
+        <h2>Anzanu (Friends)</h2>
+        <div id="confirmedFriendsContainer"></div>
+    </div>
+
+    <div class="section">
+        <h2>Friend Requests</h2>
+        <div id="friendRequests"></div>
+    </div>
+
+    <div class="section">
+        <h2>People You May Know</h2>
+        <div id="suggestedUsers">Kutsegula anthu...</div>
+    </div>
+
+<script>
+    const firebaseConfig = {
+        apiKey: "AIzaSyBBZxCwywnv_ZVXYezOV8IKG6iKWK5sL10",
+        authDomain: "studio-ywlo1.firebaseapp.com",
+        projectId: "studio-ywlo1",
+        storageBucket: "studio-ywlo1.appspot.com",
+        messagingSenderId: "791958850921",
+        appId: "1:791958850921:web:149be668e7f132e59f41f8"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    const auth = firebase.auth();
+
+    let myID = null;
+    let myName = "";
+
+    auth.onAuthStateChanged(user => {
+        if (user) {
+            myID = user.uid;
+            db.collection("users").doc(myID).get().then(doc => {
+                if(doc.exists) myName = doc.data().fullName || "User";
+                loadEverything();
+            });
+        }
+    });
+
+    function toggleFriends() {
+        const x = document.getElementById("friendsList");
+        x.style.display = (x.style.display === "block") ? "none" : "block";
+    }
+
+    function loadEverything() {
+        // Yang'anirani ma requests onse mu real-time
+        db.collection("friendRequests").onSnapshot(snapshot => {
+            const reqContainer = document.getElementById("friendRequests");
+            const friendContainer = document.getElementById("confirmedFriendsContainer");
+            
+            reqContainer.innerHTML = "";
+            friendContainer.innerHTML = "";
+            
+            let involvedIDs = [myID]; 
+
+            snapshot.forEach(doc => {
+                const req = doc.data();
+                const reqID = doc.id;
+
+                if (req.to === myID && req.status === "pending") {
+                    renderUser(req.from, reqContainer, `<button class="action btn-confirm" onclick="confirmFriend('${reqID}', '${req.from}')">Confirm</button>`);
+                }
+
+                if (req.status === "confirmed") {
+                    if (req.from === myID) {
+                        renderUser(req.to, friendContainer, `<button class="action btn-unfriend" onclick="unfriend('${reqID}')">Unfriend</button>`);
+                    } else if (req.to === myID) {
+                        renderUser(req.from, friendContainer, `<button class="action btn-unfriend" onclick="unfriend('${reqID}')">Unfriend</button>`);
+                    }
+                }
+
+                if (req.from === myID) involvedIDs.push(req.to);
+                if (req.to === myID) involvedIDs.push(req.from);
+            });
+
+            // Izi ndizo zofunika: Itana anthu onse mu system
+            loadSuggestions(involvedIDs);
+        });
+    }
+
+    function renderUser(userID, container, buttonHTML) {
+        db.collection("users").doc(userID).get().then(doc => {
+            const u = doc.data();
+            if(!u) return;
+            container.innerHTML += `
+                <div class="user-card">
+                    <div class="user-info">
+                        <img src="${u.profilePhoto || 'https://i.ibb.co/7z5nDqK/avatar.png'}">
+                        <span>${u.fullName || 'No Name'}</span>
+                    </div>
+                    ${buttonHTML}
+                </div>`;
+        });
+    }
+
+    function loadSuggestions(involvedIDs) {
+        // Tsegulani ku users popanda "where" clause kuti tione ngati akutuluka
+        db.collection("users").get().then(snap => {
+            const container = document.getElementById("suggestedUsers");
+            container.innerHTML = "";
+            
+            if (snap.empty) {
+                container.innerHTML = "<p>Palibe user aliyense mu database.</p>";
+                return;
+            }
+
+            snap.forEach(doc => {
+                // doc.id ndiyo UID yeniyeni ya ku Firestore
+                if (doc.id !== myID && !involvedIDs.includes(doc.id)) {
+                    const u = doc.data();
+                    container.innerHTML += `
+                        <div class="user-card">
+                            <div class="user-info">
+                                <img src="${u.profilePhoto || 'https://i.ibb.co/7z5nDqK/avatar.png'}">
+                                <span>${u.fullName || 'User'}</span>
+                            </div>
+                            <button class="action btn-add" onclick="sendRequest('${doc.id}', '${u.fullName}')">Add Friend</button>
+                        </div>`;
+                }
+            });
+            
+            if(container.innerHTML === "") {
+                container.innerHTML = "<p>Palibe anthu ena oti muwapange Add.</p>";
+            }
+        }).catch(err => {
+            console.error("Vuto lofufuza anthu:", err);
+            document.getElementById("suggestedUsers").innerHTML = "Vuto: Onani Security Rules zanu.";
+        });
+    }
+
+    function sendRequest(toID, toName) {
+        db.collection("friendRequests").add({
+            from: myID,
+            to: toID,
+            status: "pending",
+            timestamp: Date.now()
+        }).then(() => {
+            // Tumizani Notification
+            db.collection("notifications").add({
+                to: toID,
+                message: `${myName} wakutumizirani friend request.`,
+                timestamp: Date.now(),
+                read: false
+            });
+            alert("Request yatumizidwa kwa " + toName);
+        });
+    }
+
+    function confirmFriend(reqID, fromID) {
+        db.collection("friendRequests").doc(reqID).update({ status: "confirmed" });
+    }
+
+    function unfriend(reqID) {
+        if(confirm("Kuchotsa uyu?")) db.collection("friendRequests").doc(reqID).delete();
+    }
+</script>
+</body>
+</html>

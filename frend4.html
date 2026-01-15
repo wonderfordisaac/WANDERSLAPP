@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ny">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WanderSlapp - Friends</title>
+    <script src="https://www.gstatic.com/firebasejs/10.5.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.5.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.5.0/firebase-auth-compat.js"></script>
+    <style>
+        body { font-family: sans-serif; background: #f0f2f5; padding: 15px; margin: 0; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; background: white; padding: 10px; border-radius: 10px; }
+        .user-card { display: flex; align-items: center; background: white; padding: 10px; margin-bottom: 8px; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+        .user-info { flex-grow: 1; display: flex; align-items: center; }
+        .user-info img { width: 40px; height: 40px; border-radius: 50%; margin-right: 10px; background: #ddd; object-fit: cover; }
+        button { padding: 6px 12px; border-radius: 5px; cursor: pointer; border: none; font-weight: bold; font-size: 12px; }
+        .btn-add { background: #0a142b; color: white; }
+        .btn-friends { background: #0a142b; color: white; border-radius: 20px; }
+        #friendsSection { display: none; margin-bottom: 20px; border: 1px dashed #0a142b; padding: 10px; border-radius: 10px; }
+        h3 { font-size: 16px; color: #0a142b; margin-top: 20px; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <a href="dashboad.html" style="text-decoration:none; color:black; font-weight:bold;">← Bwererani</a>
+        <button class="btn-friends" onclick="toggleFriends()">Anzanu</button>
+    </div>
+
+    <div id="friendsSection">
+        <h3>Anzanu (Confirmed)</h3>
+        <div id="confirmedList"></div>
+    </div>
+
+    <h3>Opempha Ubwenzi (Requests)</h3>
+    <div id="requestsList"></div>
+
+    <h3>Anthu Ena (People You May Know)</h3>
+    <div id="peopleList">Kufufuza anthu...</div>
+
+<script>
+    const firebaseConfig = {
+        apiKey: "AIzaSyBBZxCwywnv_ZVXYezOV8IKG6iKWK5sL10",
+        authDomain: "studio-ywlo1.firebaseapp.com",
+        projectId: "studio-ywlo1",
+        storageBucket: "studio-ywlo1.appspot.com",
+        messagingSenderId: "791958850921",
+        appId: "1:791958850921:web:149be668e7f132e59f41f8"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    const auth = firebase.auth();
+
+    let myID = null;
+    let myName = "";
+
+    auth.onAuthStateChanged(user => {
+        if (user) {
+            myID = user.uid;
+            // Pezani dzina la munthu amene waloginnera
+            db.collection("users").doc(myID).get().then(doc => {
+                if(doc.exists) myName = doc.data().fullName;
+                loadEverything();
+            });
+        }
+    });
+
+    function toggleFriends() {
+        const x = document.getElementById("friendsSection");
+        x.style.display = (x.style.display === "block") ? "none" : "block";
+    }
+
+    function loadEverything() {
+        // 1. Yang'anira Requests ndi Friends (Real-time)
+        db.collection("friendRequests").onSnapshot(snap => {
+            const reqDiv = document.getElementById("requestsList");
+            const confDiv = document.getElementById("confirmedList");
+            reqDiv.innerHTML = "";
+            confDiv.innerHTML = "";
+
+            let involvedIDs = [myID];
+
+            snap.forEach(doc => {
+                const d = doc.data();
+                const docID = doc.id;
+
+                // Sungani ma ID a anthu onse amene tili nawo kale mu connection
+                if (d.from === myID) involvedIDs.push(d.to);
+                if (d.to === myID) involvedIDs.push(d.from);
+
+                // Ngati pali request yobwera kwa ine
+                if (d.to === myID && d.status === "pending") {
+                    renderUserCard(d.from, reqDiv, `<button class="btn-add" style="background:green" onclick="confirmReq('${docID}', '${d.from}')">Vomera</button>`);
+                }
+
+                // Ngati tili kale abwenzi
+                if (d.status === "confirmed") {
+                    let friendID = (d.from === myID) ? d.to : d.from;
+                    if(d.from === myID || d.to === myID) {
+                        renderUserCard(friendID, confDiv, `<button class="btn-add" style="background:red" onclick="removeReq('${docID}')">Unfriend</button>`);
+                    }
+                }
+            });
+
+            // 2. Itanani anthu onse (People You May Know)
+            loadSuggested(involvedIDs);
+        });
+    }
+
+    // Function yotulutsa anthu onse opanda '.where()' clause (Kuti tipewe Permission Error)
+    function loadSuggested(involvedIDs) {
+        db.collection("users").get().then(snap => {
+            const list = document.getElementById("peopleList");
+            list.innerHTML = "";
+            snap.forEach(doc => {
+                const u = doc.data();
+                const uID = doc.id;
+
+                // Usadzionetse wekha kapena anzako
+                if (!involvedIDs.includes(uID)) {
+                    list.innerHTML += `
+                        <div class="user-card">
+                            <div class="user-info">
+                                <img src="${u.profilePhoto || 'https://i.ibb.co/7z5nDqK/avatar.png'}">
+                                <span><b>${u.fullName || 'User'}</b></span>
+                            </div>
+                            <button class="btn-add" onclick="sendRequest('${uID}')">Add Friend</button>
+                        </div>`;
+                }
+            });
+            if(list.innerHTML === "") list.innerHTML = "<small>Palibe anthu ena.</small>";
+        }).catch(err => {
+            document.getElementById("peopleList").innerHTML = "Error: " + err.message;
+        });
+    }
+
+    function renderUserCard(uid, container, btnHTML) {
+        db.collection("users").doc(uid).get().then(doc => {
+            const u = doc.data();
+            if(u) {
+                container.innerHTML += `
+                    <div class="user-card">
+                        <div class="user-info">
+                            <img src="${u.profilePhoto || 'https://i.ibb.co/7z5nDqK/avatar.png'}">
+                            <span><b>${u.fullName}</b></span>
+                        </div>
+                        ${btnHTML}
+                    </div>`;
+            }
+        });
+    }
+
+    function sendRequest(toID) {
+        db.collection("friendRequests").add({
+            from: myID, to: toID, status: "pending", timestamp: Date.now()
+        }).then(() => {
+            db.collection("notifications").add({
+                to: toID, message: `${myName} wakutumizirani friend request.`, timestamp: Date.now(), read: false
+            });
+            alert("Request yatumizidwa!");
+        });
+    }
+
+    function confirmReq(docID, fromID) {
+        db.collection("friendRequests").doc(docID).update({ status: "confirmed" }).then(() => {
+            db.collection("notifications").add({
+                to: fromID, message: `${myName} wavomereza friend request yanu!`, timestamp: Date.now(), read: false
+            });
+        });
+    }
+
+    function removeReq(docID) {
+        if(confirm("Chotsa uyu?")) db.collection("friendRequests").doc(docID).delete();
+    }
+</script>
+</body>
+</html>
